@@ -24,21 +24,6 @@ app.ws("/", (ws, req) => {
   });
 });
 
-// app.post("/image", (req, res) => {
-//   try {
-//     const data = req.body.img.replace(`data:image/png;base64,`, "");
-//     fs.writeFileSync(
-//       path.resolve(__dirname, "files", `${req.query.id}.jpg`),
-//       data,
-//       "base64"
-//     );
-//     return res.status(200).json({ message: "success" });
-//   } catch (e) {
-//     console.log(e);
-//     return res.status(500).json("error");
-//   }
-// });
-
 app.post("/image", (req, res) => {
   try {
     const filePath = path.resolve(__dirname, "files", `${req.query.id}.jpg`);
@@ -79,7 +64,7 @@ const connectionHandler = (ws, msg) => {
 
 const broadcastConnection = (ws, msg) => {
   aWss.clients.forEach((client) => {
-    if (client.id === msg.id) {
+    if (client !== ws && client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify(msg));
     }
   });
