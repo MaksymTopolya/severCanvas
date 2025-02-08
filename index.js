@@ -1,71 +1,93 @@
-const express = require("express");
-const app = express();
-const WSServer = require("express-ws")(app);
-const aWss = WSServer.getWss();
-const cors = require("cors");
-const PORT = process.env.PORT;
-const fs = require("fs");
-const path = require("path");
+const WebSocket = require("ws");
 
-app.use(cors());
-app.use(express.json());
+const wss = new WebSocket.Server({ port: 5000 });
 
-app.ws("/", (ws, req) => {
-  ws.on("message", (msg) => {
-    msg = JSON.parse(msg);
+let sessions = {};
+let sessionData = {};
+
+wss.on("connection", (ws) => {
+  console.log("New client connected");
+
+  ws.on("message", (message) => {
+    const msg = JSON.parse(message);
+
     switch (msg.method) {
       case "connection":
-        connectionHandler(ws, msg);
+        handleConnection(ws, msg);
         break;
       case "draw":
-        broadcastConnection(ws, msg);
+        handleDraw(ws, msg);
         break;
+      case "clear":
+        handleClear(ws, msg);
+        break;
+      default:
+        console.log("Unknown method:", msg.method);
     }
+  });
+
+  ws.on("close", () => {
+    console.log("Client disconnected");
   });
 });
 
-app.post("/image", (req, res) => {
-  try {
-    const filePath = path.resolve(__dirname, "files", `${req.query.id}.jpg`);
-    const data = req.body.img.replace(`data:image/png;base64,`, "");
+function handleConnection(ws, msg) {
+  const sessionId = msg.id;
 
-    // Якщо файл вже існує
-    if (fs.existsSync(filePath)) {
-      console.log(`Файл з id=${req.query.id} вже існує.`);
-    }
-
-    fs.writeFileSync(filePath, data, "base64");
-    return res.status(200).json({ message: "success" });
-  } catch (e) {
-    console.log(e);
-    return res.status(500).json("error");
+  if (!sessions[sessionId]) {
+    sessions[sessionId] = [];
+    sessionData[sessionId] = [];
   }
-});
 
-app.get("/image", (req, res) => {
-  try {
-    const file = fs.readFileSync(
-      path.resolve(__dirname, "files", `${req.query.id}.jpg`)
-    );
-    const data = `data:image/png;base64,` + file.toString("base64");
-    res.json(data);
-  } catch (e) {
-    console.log(e);
-    return res.status(500).json("error");
-  }
-});
+  ws.sessionId = sessionId;
+  sessions[sessionId].push(ws);
 
-app.listen(PORT, () => console.log(`server started on PORT ${PORT}`));
+  ws.send(
+    JSON.stringify({
+      method: "init",
+      figures: sessionData[sessionId],
+    })
+  );
 
-const connectionHandler = (ws, msg) => {
-  ws.id = msg.id;
-  broadcastConnection(ws, msg);
-};
+  broadcast(ws, {
+    method: "connection",
+    username: msg.username,
+    message: `${msg.username} connected to session ${sessionId}`,
+  });
+}
 
-const broadcastConnection = (ws, msg) => {
-  aWss.clients.forEach((client) => {
+function handleDraw(ws, msg) {
+  const sessionId = ws.sessionId;
+
+  if (!sessionId || !sessions[sessionId]) return;
+
+  sessionData[sessionId].push(msg.figure);
+
+  broadcast(ws, msg);
+}
+
+function handleClear(ws, msg) {
+  const sessionId = ws.sessionId;
+
+  if (!sessionId || !sessions[sessionId]) return;
+
+  sessionData[sessionId] = [];
+
+  broadcast(ws, {
+    method: "clear",
+  });
+}
+
+function broadcast(ws, msg) {
+  const sessionId = ws.sessionId;
+
+  if (!sessions[sessionId]) return;
+
+  sessions[sessionId].forEach((client) => {
     if (client !== ws && client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify(msg));
     }
   });
-};
+}
+
+console.log("WebSocket server is running on ws://localhost:5000");
